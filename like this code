@@ -1,0 +1,352 @@
+#include <iostream>
+#include <string>
+
+using namespace std;
+
+// ==================== 1. نموذج بيانات الطلب ====================
+struct ApiRequest {
+    int id;
+    string endpoint;
+    string method; // GET, POST, etc.
+    bool success;
+
+    ApiRequest(int _id = 0, string _ep = "", string _m = "GET", bool _ok = true)
+        : id(_id), endpoint(_ep), method(_m), success(_ok) {}
+};
+
+// ==================== 2. Queue (FIFO) للطلبات الواردة ====================
+struct QueueNode {
+    ApiRequest data;
+    QueueNode* next;
+    QueueNode(ApiRequest d) : data(d), next(nullptr) {}
+};
+
+class RequestQueue {
+private:
+    QueueNode* frontNode;
+    QueueNode* rearNode;
+    int count;
+
+public:
+    RequestQueue() : frontNode(nullptr), rearNode(nullptr), count(0) {}
+
+    bool isEmpty() const { return frontNode == nullptr; }
+    int size() const { return count; }
+
+    void enqueue(ApiRequest req) {
+        QueueNode* node = new QueueNode(req);
+        if (isEmpty()) {
+            frontNode = rearNode = node;
+        } else {
+            rearNode->next = node;
+            rearNode = node;
+        }
+        count++;
+    }
+
+    bool dequeue(ApiRequest& outReq) {
+        if (isEmpty()) return false;
+        QueueNode* temp = frontNode;
+        outReq = temp->data;
+        frontNode = frontNode->next;
+        if (frontNode == nullptr) rearNode = nullptr;
+        delete temp;
+        count--;
+        return true;
+    }
+
+    ~RequestQueue() {
+        ApiRequest dummy;
+        while (dequeue(dummy)) {}
+    }
+};
+
+// ==================== 3. Stack (LIFO) لسجل الطلبات الفاشلة ====================
+struct StackNode {
+    ApiRequest data;
+    StackNode* next;
+    StackNode(ApiRequest d) : data(d), next(nullptr) {}
+};
+
+class FailedRequestStack {
+private:
+    StackNode* topNode;
+    int count;
+
+public:
+    FailedRequestStack() : topNode(nullptr), count(0) {}
+
+    bool isEmpty() const { return topNode == nullptr; }
+    int size() const { return count; }
+
+    void push(ApiRequest req) {
+        StackNode* node = new StackNode(req);
+        node->next = topNode;
+        topNode = node;
+        count++;
+    }
+
+    bool pop(ApiRequest& outReq) {
+        if (isEmpty()) return false;
+        StackNode* temp = topNode;
+        outReq = temp->data;
+        topNode = topNode->next;
+        delete temp;
+        count--;
+        return true;
+    }
+
+    bool peek(ApiRequest& outReq) const {
+        if (isEmpty()) return false;
+        outReq = topNode->data;
+        return true;
+    }
+
+    ~FailedRequestStack() {
+        ApiRequest dummy;
+        while (pop(dummy)) {}
+    }
+};
+
+// ==================== 4. Linked List لسجلات الـ Endpoints ====================
+struct EndpointNode {
+    string path;
+    bool active;
+    EndpointNode* next;
+    EndpointNode(string p, bool act = true) : path(p), active(act), next(nullptr) {}
+};
+
+class EndpointList {
+private:
+    EndpointNode* head;
+
+public:
+    EndpointList() : head(nullptr) {}
+
+    void addEndpoint(string path, bool active = true) {
+        if (exists(path)) {
+            cout << "[!] Endpoint already exists.\n";
+            return;
+        }
+        EndpointNode* node = new EndpointNode(path, active);
+        node->next = head;
+        head = node;
+        cout << "[+] Endpoint added.\n";
+    }
+
+    bool exists(string path) const {
+        EndpointNode* curr = head;
+        while (curr != nullptr) {
+            if (curr->path == path) return true;
+            curr = curr->next;
+        }
+        return false;
+    }
+
+    void display() const {
+        if (!head) {
+            cout << "No endpoints registered.\n";
+            return;
+        }
+        EndpointNode* curr = head;
+        cout << "--- Registered Endpoints ---\n";
+        while (curr != nullptr) {
+            cout << "- " << curr->path << " [" << (curr->active ? "ACTIVE" : "DOWN") << "]\n";
+            curr = curr->next;
+        }
+    }
+
+    ~EndpointList() {
+        while (head != nullptr) {
+            EndpointNode* temp = head;
+            head = head->next;
+            delete temp;
+        }
+    }
+};
+
+// ==================== 5. BST للبحث عن الطلبات بـ ID ====================
+struct BstNode {
+    ApiRequest data;
+    BstNode* left;
+    BstNode* right;
+    BstNode(ApiRequest d) : data(d), left(nullptr), right(nullptr) {}
+};
+
+class RequestBST {
+private:
+    BstNode* root;
+
+    BstNode* insertRec(BstNode* node, ApiRequest req, bool& inserted) {
+        if (node == nullptr) {
+            inserted = true;
+            return new BstNode(req);
+        }
+        if (req.id < node->data.id) {
+            node->left = insertRec(node->left, req, inserted);
+        } else if (req.id > node->data.id) {
+            node->right = insertRec(node->right, req, inserted);
+        } else {
+            inserted = false; // Duplicate ID ignored
+        }
+        return node;
+    }
+
+    BstNode* searchRec(BstNode* node, int id) const {
+        if (node == nullptr || node->data.id == id) return node;
+        if (id < node->data.id) return searchRec(node->left, id);
+        return searchRec(node->right, id);
+    }
+
+    void inorderRec(BstNode* node) const {
+        if (node == nullptr) return;
+        inorderRec(node->left);
+        cout << "ID: " << node->data.id
+             << " | " << node->data.method
+             << " " << node->data.endpoint
+             << " | Status: " << (node->data.success ? "200 OK" : "500 FAIL") << "\n";
+        inorderRec(node->right);
+    }
+
+    void destroyRec(BstNode* node) {
+        if (!node) return;
+        destroyRec(node->left);
+        destroyRec(node->right);
+        delete node;
+    }
+
+public:
+    RequestBST() : root(nullptr) {}
+
+    bool insert(ApiRequest req) {
+        bool inserted = false;
+        root = insertRec(root, req, inserted);
+        return inserted;
+    }
+
+    bool searchById(int id, ApiRequest& outReq) const {
+        BstNode* found = searchRec(root, id);
+        if (!found) return false;
+        outReq = found->data;
+        return true;
+    }
+
+    void displayInorder() const {
+        if (!root) {
+            cout << "No processed requests in BST.\n";
+            return;
+        }
+        cout << "--- Processed Requests (Sorted by ID) ---\n";
+        inorderRec(root);
+    }
+
+    ~RequestBST() {
+        destroyRec(root);
+    }
+};
+
+// ==================== 6. القائمة الرئيسية والمحاكاة ====================
+int main() {
+    RequestQueue incomingQueue;
+    FailedRequestStack failedStack;
+    EndpointList endpoints;
+    RequestBST processedBst;
+
+    // شوية بيانات مبدئية لتجربة سريعة
+    endpoints.addEndpoint("/users");
+    endpoints.addEndpoint("/orders");
+
+    int choice = -1;
+    while (choice != 0) {
+        cout << "\n=== API Request Processing Simulator ===\n";
+        cout << "1. Add Endpoint\n";
+        cout << "2. Send Incoming API Request (Enqueue)\n";
+        cout << "3. Process Next Request (Dequeue -> BST / Stack)\n";
+        cout << "4. Search Processed Request by ID (BST)\n";
+        cout << "5. View Last Failed Request (Stack Peek)\n";
+        cout << "6. Display Endpoints & Processed Requests\n";
+        cout << "0. Exit\n";
+        cout << "Choice: ";
+
+        if (!(cin >> choice)) {
+            cin.clear();
+            cin.ignore(10000, '\n');
+            cout << "[!] Invalid input. Enter a number.\n";
+            continue;
+        }
+
+        if (choice == 1) {
+            string ep;
+            cout << "Enter endpoint path (e.g., /products): ";
+            cin >> ep;
+            endpoints.addEndpoint(ep, true);
+        } else if (choice == 2) {
+            int id;
+            string ep, method;
+            cout << "Enter Request ID: ";
+            cin >> id;
+            cout << "Enter Endpoint (e.g., /users): ";
+            cin >> ep;
+            cout << "Enter Method (GET/POST): ";
+            cin >> method;
+
+            if (!cin) {
+                cin.clear();
+                cin.ignore(10000, '\n');
+                cout << "[!] Invalid input.\n";
+                continue;
+            }
+
+            incomingQueue.enqueue(ApiRequest(id, ep, method, true));
+            cout << "[+] Request #" << id << " added to queue. Waiting: " << incomingQueue.size() << "\n";
+        } else if (choice == 3) {
+            ApiRequest req;
+            if (!incomingQueue.dequeue(req)) {
+                cout << "[!] Queue is empty. No requests to process.\n";
+                continue;
+            }
+
+            // لو الـ endpoint مش موجود في Linked List نعتبر الطلب فشل
+            req.success = endpoints.exists(req.endpoint);
+
+            if (!processedBst.insert(req)) {
+                cout << "[!] Duplicate Request ID " << req.id << " skipped in BST.\n";
+            }
+
+            if (req.success) {
+                cout << "[OK] Processed Request #" << req.id << " -> " << req.endpoint << "\n";
+            } else {
+                req.success = false;
+                failedStack.push(req);
+                cout << "[FAIL] Endpoint not found for Request #" << req.id << ". Pushed to failed stack.\n";
+            }
+        } else if (choice == 4) {
+            int id;
+            cout << "Enter Request ID to search: ";
+            cin >> id;
+            ApiRequest found;
+            if (processedBst.searchById(id, found)) {
+                cout << "[Found] ID: " << found.id << " | " << found.method << " " << found.endpoint
+                     << " | " << (found.success ? "Success" : "Failed") << "\n";
+            } else {
+                cout << "[!] Request ID not found.\n";
+            }
+        } else if (choice == 5) {
+            ApiRequest lastFail;
+            if (failedStack.peek(lastFail)) {
+                cout << "[Last Failed] ID: " << lastFail.id << " | " << lastFail.endpoint << "\n";
+            } else {
+                cout << "[!] Failed stack is empty.\n";
+            }
+        } else if (choice == 6) {
+            endpoints.display();
+            processedBst.displayInorder();
+        } else if (choice == 0) {
+            cout << "Exiting...\n";
+        } else {
+            cout << "[!] Invalid choice.\n";
+        }
+    }
+
+    return 0;
+}
